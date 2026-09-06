@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111827">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg">
+<title>Expense Tracker</title>
+<style>
+:root{--bg:#f5f7fb;--card:#fff;--text:#111827;--muted:#6b7280;--line:#e5e7eb;--accent:#2563eb;--danger:#dc2626}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.app{max-width:720px;margin:auto;padding:18px 16px 90px}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
+h1{font-size:25px;margin:0}.iconbtn{border:0;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:18px;margin-bottom:14px;box-shadow:0 2px 8px #00000008}
+.monthrow{display:flex;gap:8px;align-items:center}.monthrow select{flex:1}
+.total-label{color:var(--muted);font-size:14px}.total{font-size:34px;font-weight:750;margin-top:4px}
+button,input,select{font:inherit}input,select{width:100%;padding:12px;border:1px solid var(--line);border-radius:11px;background:#fff;color:var(--text)}
+.primary{width:100%;border:0;border-radius:12px;padding:13px;background:var(--accent);color:#fff;font-weight:650;margin-top:10px}
+.danger{color:var(--danger);background:none;border:0;padding:8px}.expense{display:flex;justify-content:space-between;gap:12px;padding:14px 0;border-bottom:1px solid var(--line)}
+.expense:last-child{border-bottom:0}.desc{font-weight:600}.date{color:var(--muted);font-size:13px;margin-top:3px}.amount{font-weight:700;white-space:nowrap}.empty{text-align:center;color:var(--muted);padding:25px}
+.modal{position:fixed;inset:0;background:#0007;display:none;align-items:flex-end;justify-content:center;padding:0}.modal.show{display:flex}.sheet{background:var(--card);width:min(720px,100%);border-radius:22px 22px 0 0;padding:20px}.sheet h2{margin-top:0}.field{margin:12px 0}.field label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+.actions{display:flex;gap:8px}.secondary{flex:1;border:1px solid var(--line);background:var(--card);border-radius:12px;padding:12px}.actions .primary{flex:2}
+.small{font-size:12px;color:var(--muted);line-height:1.5}
+</style>
+</head>
+<body>
+<main class="app">
+  <div class="top"><h1>Expense Tracker</h1><button class="iconbtn" id="settingsBtn" aria-label="Settings">⚙️</button></div>
+  <section class="card">
+    <div class="monthrow">
+      <select id="month"></select><select id="year"></select>
+    </div>
+    <div style="margin-top:18px"><div class="total-label">Total expense</div><div class="total" id="total">₹0</div></div>
+    <button class="primary" id="addBtn">＋ Add Expense</button>
+  </section>
+  <section class="card"><div id="list"></div></section>
+</main>
+
+<div class="modal" id="modal">
+ <div class="sheet">
+  <h2 id="formTitle">Add Expense</h2>
+  <form id="form">
+   <input type="hidden" id="editId">
+   <div class="field"><label>Description</label><input id="desc" required maxlength="120" placeholder="e.g. Groceries"></div>
+   <div class="field"><label>Amount (₹)</label><input id="amount" required inputmode="decimal" type="number" min="0.01" step="0.01" placeholder="850"></div>
+   <div class="field"><label>Date</label><input id="date" required type="date"></div>
+   <div class="actions"><button type="button" class="secondary" id="cancelBtn">Cancel</button><button class="primary" type="submit">Save</button></div>
+  </form>
+ </div>
+</div>
+
+<script>
+const DB_NAME="private_expense_tracker", STORE="expenses";
+let db;
+const $=id=>document.getElementById(id);
+function money(n){return new Intl.NumberFormat("en-IN",{style:"currency",currency:"INR",maximumFractionDigits:2}).format(n)}
+function today(){return new Date().toISOString().slice(0,10)}
+function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open(DB_NAME,1);r.onupgradeneeded=()=>r.result.createObjectStore(STORE,{keyPath:"id",autoIncrement:true});r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+function all(){return new Promise((res,rej)=>{const r=db.transaction(STORE).objectStore(STORE).getAll();r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+function put(x){return new Promise((res,rej)=>{const r=db.transaction(STORE,"readwrite").objectStore(STORE).put(x);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+function del(id){return new Promise((res,rej)=>{const r=db.transaction(STORE,"readwrite").objectStore(STORE).delete(id);r.onsuccess=()=>res();r.onerror=()=>rej(r.error)})}
+function setupSelectors(){
+ const now=new Date(), m=now.getMonth(), y=now.getFullYear();
+ const names=["January","February","March","April","May","June","July","August","September","October","November","December"];
+ $("month").innerHTML=names.map((n,i)=>`<option value="${i}">${n}</option>`).join("");
+ let ys=[]; for(let i=y-10;i<=y+10;i++) ys.push(`<option>${i}</option>`);
+ $("year").innerHTML=ys.join(""); $("month").value=m; $("year").value=y;
+ $("month").onchange=render; $("year").onchange=render;
+}
+async function render(){
+ const m=+ $("month").value,y=+$("year").value;
+ const items=(await all()).filter(x=>{const d=new Date(x.date+"T00:00:00");return d.getMonth()===m&&d.getFullYear()===y}).sort((a,b)=>b.date.localeCompare(a.date)||b.id-a.id);
+ const total=items.reduce((s,x)=>s+x.amount,0); $("total").textContent=money(total);
+ $("list").innerHTML=items.length?items.map(x=>`<div class="expense"><div><div class="desc">${escapeHtml(x.description)}</div><div class="date">${new Date(x.date+"T00:00:00").toLocaleDateString("en-IN",{day:"2-digit",month:"short",year:"numeric"})}</div></div><div style="text-align:right"><div class="amount">${money(x.amount)}</div><button class="danger" data-edit="${x.id}">Edit</button><button class="danger" data-del="${x.id}">Delete</button></div></div>`).join(""):`<div class="empty">No expenses for this month.</div>`;
+ document.querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{if(confirm("Delete this expense?")){await del(+b.dataset.del);render()}});
+ document.querySelectorAll("[data-edit]").forEach(b=>b.onclick=async()=>{const x=(await all()).find(e=>e.id===+b.dataset.edit);openForm(x)});
+}
+function escapeHtml(s){return s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
+function openForm(x=null){$("formTitle").textContent=x?"Edit Expense":"Add Expense";$("editId").value=x?.id||"";$("desc").value=x?.description||"";$("amount").value=x?.amount||"";$("date").value=x?.date||today();$("modal").classList.add("show")}
+$("addBtn").onclick=()=>openForm();$("cancelBtn").onclick=()=>$("modal").classList.remove("show");
+$("form").onsubmit=async e=>{e.preventDefault();const id=$("editId").value;await put({...(id?{id:+id}:{}),description:$("desc").value.trim(),amount:Number($("amount").value),date:$("date").value});$("modal").classList.remove("show");render()};
+$("settingsBtn").onclick=()=>alert("Privacy: this app stores expenses only in this browser's local IndexedDB. No server, account, analytics or network sync is used by the app.");
+(async()=>{db=await openDB();setupSelectors();await render();if("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js")})()
+</script>
+</body>
+</html>
